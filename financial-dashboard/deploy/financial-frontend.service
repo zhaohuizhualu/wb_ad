@@ -1,0 +1,14 @@
+[Unit]
+Description=Financial Dashboard Frontend (Next.js)
+After=network.target financial-backend.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__WB_AD__/financial-dashboard/frontend
+ExecStart=/usr/bin/npx next dev -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+apscheduler
+akshare
+pandas
+httpx
+pydantic
+pydantic-settings
+python-dateutil
+loguru

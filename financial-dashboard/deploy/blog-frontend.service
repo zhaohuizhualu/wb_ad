@@ -1,0 +1,14 @@
+[Unit]
+Description=Blog Frontend (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__WB_AD__/blog/frontend
+ExecStart=/usr/bin/npx next start -H 127.0.0.1 -p 3001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

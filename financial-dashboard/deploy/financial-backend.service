@@ -1,0 +1,15 @@
+[Unit]
+Description=Financial Dashboard Backend (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__WB_AD__/financial-dashboard/backend
+Environment=PYTHONPATH=__WB_AD__/financial-dashboard/backend
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
