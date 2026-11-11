@@ -58,7 +58,7 @@ function profitColor(rate: number | null): string {
   return rate >= 0 ? 'text-red-600' : 'text-green-600'
 }
 
-/** 计算单个标的市值 */
+/** 计算单个标的市值（原始货币，未换算） */
 function calcMarketValue(item: PortfolioItem): number | null {
   if (item.last_price !== null && item.shares !== null) {
     return item.last_price * item.shares
@@ -66,62 +66,15 @@ function calcMarketValue(item: PortfolioItem): number | null {
   return null
 }
 
-function round2(v: number): number { return Math.round(v * 100) / 100 }
-
-// ---------- Collapsible Section Component ----------
-function CollapsibleSection({
-  title,
-  count,
-  summary,
-  children,
-}: {
-  title: string
-  count: number
-  summary?: { cost: number | null; profit: number | null; profitRate: number | null }
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50/50">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
-      >
-        <div className="flex items-center gap-2">
-          <span className={`text-sm transition-transform ${open ? 'rotate-90' : ''}`}>
-            ▶
-          </span>
-          <span className="text-sm font-semibold text-gray-700">{title}</span>
-          <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-            {count} 条
-          </span>
-        </div>
-        {summary && (
-          <div className="flex gap-4 text-xs text-gray-500">
-            {summary.cost !== null && (
-              <span>成本: <span className="font-medium text-gray-700">{formatCurrency(summary.cost)}</span></span>
-            )}
-            {summary.profit !== null && (
-              <span>盈亏: <span className={`font-medium ${profitColor(summary.profitRate)}`}>
-                {(summary.profit >= 0 ? '+' : '') + formatNumber(summary.profit, 2)}
-              </span></span>
-            )}
-            {summary.profitRate !== null && (
-              <span className={profitColor(summary.profitRate)}>
-                {(summary.profitRate >= 0 ? '+' : '') + formatNumber(summary.profitRate, 2) + '%'}
-              </span>
-            )}
-          </div>
-        )}
-      </button>
-      {open && (
-        <div className="border-t border-gray-200 bg-white">
-          {children}
-        </div>
-      )}
-    </div>
-  )
+/** 根据市场获取汇率（转换为人民币） */
+function getMarketRate(market: string, summary: PortfolioSummary | null): number {
+  if (!summary?.exchange_rates) return 1.0
+  if (market === '港股') return summary.exchange_rates.HKD_CNY || 1.0
+  if (market === '美股') return summary.exchange_rates.USD_CNY || 1.0
+  return 1.0
 }
+
+function round2(v: number): number { return Math.round(v * 100) / 100 }
 
 // ---------- Closed Stock Form ----------
 function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => void }) {
@@ -133,6 +86,7 @@ function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => v
   const [sellPrice, setSellPrice] = useState('')
   const [buyDate, setBuyDate] = useState('')
   const [sellDate, setSellDate] = useState('')
+  const [fee, setFee] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -152,10 +106,11 @@ function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => v
         sell_price: sellPrice ? parseFloat(sellPrice) : undefined,
         buy_date: buyDate || undefined,
         sell_date: sellDate || undefined,
+        fee: fee ? parseFloat(fee) : undefined,
         notes: notes || undefined,
       })
       setCode(''); setName(''); setShares(''); setBuyPrice(''); setSellPrice('')
-      setBuyDate(''); setSellDate(''); setNotes('')
+      setBuyDate(''); setSellDate(''); setFee(''); setNotes('')
       setShow(false)
       onAdded()
     } catch (e: any) {
@@ -179,7 +134,7 @@ function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => v
   return (
     <form onSubmit={handleSubmit} className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-4">
       {err && <div className="mb-2 text-xs text-red-600">{err}</div>}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <input value={code} onChange={e => setCode(e.target.value)} placeholder="股票代码" required className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input value={name} onChange={e => setName(e.target.value)} placeholder="股票名称" required className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input type="number" value={shares} onChange={e => setShares(e.target.value)} placeholder="买入数量" required className="rounded border border-gray-300 px-2 py-1 text-xs" />
@@ -187,6 +142,7 @@ function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => v
         <input type="number" value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder="卖出均价" className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input type="date" value={buyDate} onChange={e => setBuyDate(e.target.value)} placeholder="买入日期" className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input type="date" value={sellDate} onChange={e => setSellDate(e.target.value)} placeholder="卖出日期" className="rounded border border-gray-300 px-2 py-1 text-xs" />
+        <input type="number" value={fee} onChange={e => setFee(e.target.value)} placeholder="手续费" className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="备注" className="rounded border border-gray-300 px-2 py-1 text-xs" />
       </div>
       <div className="mt-2 flex justify-end gap-2">
@@ -210,6 +166,7 @@ function ClosedOptionForm({ market, onAdded }: { market: string; onAdded: () => 
   const [closePremium, setClosePremium] = useState('')
   const [openDate, setOpenDate] = useState('')
   const [closeDate, setCloseDate] = useState('')
+  const [fee, setFee] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -232,10 +189,11 @@ function ClosedOptionForm({ market, onAdded }: { market: string; onAdded: () => 
         close_premium: closePremium ? parseFloat(closePremium) : undefined,
         open_date: openDate || undefined,
         close_date: closeDate || undefined,
+        fee: fee ? parseFloat(fee) : undefined,
         notes: notes || undefined,
       })
       setUnderlyingCode(''); setContractCode(''); setContracts(''); setStrikePrice('')
-      setOpenPremium(''); setClosePremium(''); setOpenDate(''); setCloseDate(''); setNotes('')
+      setOpenPremium(''); setClosePremium(''); setOpenDate(''); setCloseDate(''); setFee(''); setNotes('')
       setShow(false)
       onAdded()
     } catch (e: any) {
@@ -259,7 +217,7 @@ function ClosedOptionForm({ market, onAdded }: { market: string; onAdded: () => 
   return (
     <form onSubmit={handleSubmit} className="mb-3 rounded-lg border border-purple-200 bg-purple-50 p-4">
       {err && <div className="mb-2 text-xs text-red-600">{err}</div>}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <input value={underlyingCode} onChange={e => setUnderlyingCode(e.target.value)} placeholder="标的代码" required className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input value={contractCode} onChange={e => setContractCode(e.target.value)} placeholder="合约代码" required className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <select value={direction} onChange={e => setDirection(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs">
@@ -275,6 +233,7 @@ function ClosedOptionForm({ market, onAdded }: { market: string; onAdded: () => 
         <input type="number" value={closePremium} onChange={e => setClosePremium(e.target.value)} placeholder="平仓权利金/股" className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input type="date" value={openDate} onChange={e => setOpenDate(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input type="date" value={closeDate} onChange={e => setCloseDate(e.target.value)} className="rounded border border-gray-300 px-2 py-1 text-xs" />
+        <input type="number" value={fee} onChange={e => setFee(e.target.value)} placeholder="手续费" className="rounded border border-gray-300 px-2 py-1 text-xs" />
         <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="备注" className="rounded border border-gray-300 px-2 py-1 text-xs" />
       </div>
       <div className="mt-2 flex justify-end gap-2">
@@ -314,6 +273,7 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
       sell_price: item.sell_price !== null ? String(item.sell_price) : '',
       buy_date: item.buy_date || '',
       sell_date: item.sell_date || '',
+      fee: item.fee !== null ? String(item.fee) : '',
       notes: item.notes || '',
     })
   }
@@ -326,7 +286,7 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
       const payload: any = {}
       for (const [k, v] of Object.entries(editData)) {
         if (v !== '') {
-          if (k === 'shares' || k === 'buy_price' || k === 'sell_price') {
+          if (k === 'shares' || k === 'buy_price' || k === 'sell_price' || k === 'fee') {
             payload[k] = parseFloat(v)
           } else {
             payload[k] = v
@@ -346,7 +306,7 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50">
+        <thead className="bg-gray-50 sticky top-0">
           <tr>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">代码</th>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">名称</th>
@@ -357,10 +317,12 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">卖出均价</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">买入总额</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">卖出总额</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">手续费</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">盈亏</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">收益率</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">持有天数</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">年化</th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">备注</th>
             <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">操作</th>
           </tr>
         </thead>
@@ -392,6 +354,9 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.buy_total !== null ? formatNumber(item.buy_total) : '-'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.sell_total !== null ? formatNumber(item.sell_total) : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
+                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee) : '-')}
+                </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.profit)}`}>
                   {item.profit !== null ? (item.profit >= 0 ? '+' : '') + formatNumber(item.profit) : '-'}
                 </td>
@@ -401,6 +366,9 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-500">{item.holding_days !== null ? item.holding_days + '天' : '-'}</td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs ${profitColor(item.annualized)}`}>
                   {item.annualized !== null ? (item.annualized >= 0 ? '+' : '') + formatNumber(item.annualized) + '%' : '-'}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-left text-xs text-gray-700">
+                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : (item.notes || '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-center text-xs">
                   {isEditing ? (
@@ -443,6 +411,7 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
       close_premium: item.close_premium !== null ? String(item.close_premium) : '',
       open_date: item.open_date || '',
       close_date: item.close_date || '',
+      fee: item.fee !== null ? String(item.fee) : '',
       notes: item.notes || '',
     })
   }
@@ -455,7 +424,7 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
       const payload: any = {}
       for (const [k, v] of Object.entries(editData)) {
         if (v !== '') {
-          if (k === 'strike_price' || k === 'contracts' || k === 'multiplier' || k === 'open_premium' || k === 'close_premium') {
+          if (k === 'strike_price' || k === 'contracts' || k === 'multiplier' || k === 'open_premium' || k === 'close_premium' || k === 'fee') {
             payload[k] = parseFloat(v)
           } else {
             payload[k] = v
@@ -475,7 +444,7 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50">
+        <thead className="bg-gray-50 sticky top-0">
           <tr>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">标的代码</th>
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">合约代码</th>
@@ -489,11 +458,13 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">平仓权利金/股</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">开仓总额</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">平仓总额</th>
+            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">手续费</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">净权利金盈亏</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">保证金</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">收益率</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">持有天数</th>
             <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">年化</th>
+            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">备注</th>
             <th className="px-3 py-2 text-center text-xs font-medium text-gray-500">操作</th>
           </tr>
         </thead>
@@ -542,6 +513,9 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.open_total !== null ? formatNumber(item.open_total) : '-'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.close_total !== null ? formatNumber(item.close_total) : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
+                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee) : '-')}
+                </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.net_premium)}`}>
                   {item.net_premium !== null ? (item.net_premium >= 0 ? '+' : '') + formatNumber(item.net_premium) : '-'}
                 </td>
@@ -552,6 +526,9 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-500">{item.holding_days !== null ? item.holding_days + '天' : '-'}</td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs ${profitColor(item.annualized)}`}>
                   {item.annualized !== null ? (item.annualized >= 0 ? '+' : '') + formatNumber(item.annualized) + '%' : '-'}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-left text-xs text-gray-700">
+                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : (item.notes || '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-center text-xs">
                   {isEditing ? (
@@ -593,6 +570,8 @@ export default function PortfolioPage() {
   const [newMarket, setNewMarket] = useState('A股')
   const [newShares, setNewShares] = useState('')
   const [newCost, setNewCost] = useState('')
+  const [newFee, setNewFee] = useState('')
+  const [newNotes, setNewNotes] = useState('')
   const [adding, setAdding] = useState(false)
 
   // 搜索联想
@@ -606,6 +585,8 @@ export default function PortfolioPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editShares, setEditShares] = useState('')
   const [editCost, setEditCost] = useState('')
+  const [editFee, setEditFee] = useState('')
+  const [editNotes, setEditNotes] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
   const loadData = async () => {
@@ -720,8 +701,10 @@ export default function PortfolioPage() {
         market: newMarket,
         shares: parseFloat(newShares),
         avg_cost: newCost ? parseFloat(newCost) : undefined,
+        fee: newFee ? parseFloat(newFee) : undefined,
+        notes: newNotes || undefined,
       })
-      setNewCode(''); setNewName(''); setNewShares(''); setNewCost('')
+      setNewCode(''); setNewName(''); setNewShares(''); setNewCost(''); setNewFee(''); setNewNotes('')
       setShowAddForm(false); setShowSearchDropdown(false)
       await loadData()
     } catch (err: any) {
@@ -740,21 +723,26 @@ export default function PortfolioPage() {
     setEditingId(item.id)
     setEditShares(item.shares !== null ? String(item.shares) : '')
     setEditCost(item.avg_cost !== null ? String(item.avg_cost) : '')
+    setEditFee(item.fee !== null ? String(item.fee) : '')
+    setEditNotes(item.notes || '')
   }
 
   const handleEditCancel = () => {
-    setEditingId(null); setEditShares(''); setEditCost('')
+    setEditingId(null); setEditShares(''); setEditCost(''); setEditFee(''); setEditNotes('')
   }
 
   const handleEditSave = async (id: number) => {
     const sharesNum = parseFloat(editShares)
     const costNum = editCost ? parseFloat(editCost) : undefined
+    const feeNum = editFee ? parseFloat(editFee) : undefined
     if (isNaN(sharesNum) || sharesNum < 0) { setError('持仓数量必须为非负数'); return }
     if (editCost && (isNaN(costNum!) || costNum! < 0)) { setError('平均成本必须为非负数'); return }
     setSavingEdit(true)
     try {
-      const payload: { shares?: number; avg_cost?: number } = { shares: sharesNum }
+      const payload: { shares?: number; avg_cost?: number; fee?: number; notes?: string } = { shares: sharesNum }
       if (editCost) payload.avg_cost = costNum
+      if (editFee) payload.fee = feeNum
+      if (editNotes !== undefined) payload.notes = editNotes
       await updatePortfolioItem(id, payload)
       setEditingId(null)
       await loadData()
@@ -765,7 +753,7 @@ export default function PortfolioPage() {
     }
   }
 
-  // 按市场分组，并按市值降序排列
+  // 按市场分组，并按市值降序排列（使用人民币换算后的市值）
   const grouped: Record<string, PortfolioItem[]> = {}
   items.forEach((item) => {
     if (!grouped[item.market]) grouped[item.market] = []
@@ -773,8 +761,10 @@ export default function PortfolioPage() {
   })
   Object.values(grouped).forEach((list) => {
     list.sort((a, b) => {
-      const mvA = calcMarketValue(a) ?? -Infinity
-      const mvB = calcMarketValue(b) ?? -Infinity
+      const rateA = getMarketRate(a.market, summary)
+      const rateB = getMarketRate(b.market, summary)
+      const mvA = (calcMarketValue(a) ?? -Infinity) * rateA
+      const mvB = (calcMarketValue(b) ?? -Infinity) * rateB
       return mvB - mvA
     })
   })
@@ -937,7 +927,7 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* 添加表单 */}
+        {/* 添加表单 — 始终在导航和总览之后渲染，不依赖 items 是否为空 */}
         {showAddForm && (
           <div className="mb-8 rounded-lg border border-blue-200 bg-blue-50 p-6">
             <h2 className="mb-4 text-lg font-semibold text-gray-900">添加持仓</h2>
@@ -983,6 +973,16 @@ export default function PortfolioPage() {
                 <input type="number" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="可选" min="0" step="0.01"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
+              <div className="md:col-span-1">
+                <label className="mb-1 block text-sm font-medium text-gray-700">手续费</label>
+                <input type="number" value={newFee} onChange={(e) => setNewFee(e.target.value)} placeholder="可选" min="0" step="0.01"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-medium text-gray-700">备注</label>
+                <input type="text" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="可选"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
               <div className="md:col-span-6 flex justify-end">
                 <button type="submit" disabled={adding}
                   className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:opacity-50">
@@ -993,142 +993,192 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {/* 持仓 + 已清仓列表 */}
+        {/* ===== 持仓表格 ===== */}
         {loading ? (
           <div className="py-20 text-center text-gray-500">加载中...</div>
-        ) : items.length === 0 && closedStocks.length === 0 && closedOptions.length === 0 ? (
-          <div className="rounded-lg bg-white p-10 text-center text-gray-500 shadow">暂无持仓记录，点击右上角「添加持仓」开始配置</div>
         ) : (
           <div className="space-y-4">
-            {marketOrder.map(market => {
-              const marketItems = grouped[market] || []
-              const marketSummary = summary?.markets?.[market]
-              const csItems = closedStocksByMarket[market] || []
-              const coItems = closedOptionsByMarket[market] || []
+            {/* 持仓表格 — 按市场分组 */}
+            {items.length === 0 ? (
+              <div className="rounded-lg bg-white p-10 text-center text-gray-500 shadow">
+                暂无持仓记录，点击右上角「添加持仓」开始配置
+              </div>
+            ) : (
+              marketOrder.map(market => {
+                const marketItems = grouped[market] || []
+                const marketSummary = summary?.markets?.[market]
 
-              return (
-                <div key={market} className="space-y-3">
-                  {/* 持仓 */}
-                  {marketItems.length > 0 && (
-                    <div className="rounded-lg bg-white shadow">
+                if (marketItems.length === 0) return null
+
+                return (
+                  <div key={market} className="rounded-lg bg-white shadow">
+                    <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+                      <h2 className="text-lg font-bold text-gray-900">{market} 持仓</h2>
+                      {marketSummary && (
+                        <div className="flex gap-4 text-sm">
+                          <span className="text-gray-500">市值: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_market_value)}</span></span>
+                          <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_cost)}</span></span>
+                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>{' '}{formatCurrency(marketSummary.total_profit)}</span></span>
+                          <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>
+                            {marketSummary.profit_rate !== null && marketSummary.profit_rate !== undefined
+                              ? (marketSummary.profit_rate >= 0 ? '+' : '') + formatNumber(marketSummary.profit_rate, 2) + '%' : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">代码</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">名称</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">持仓数量</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">平均成本</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">最新价</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">市值</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">手续费</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">盈亏</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">备注</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {marketItems.map((item) => {
+                            const isEditing = editingId === item.id
+                            const rate = getMarketRate(item.market, summary)
+                            const marketValueRaw = calcMarketValue(item)
+                            const costValueRaw = item.avg_cost !== null && item.shares !== null ? item.avg_cost * item.shares : null
+                            const feeValue = (item.fee || 0) * rate
+                            const marketValue = marketValueRaw !== null ? marketValueRaw * rate : null
+                            const costValue = costValueRaw !== null ? costValueRaw * rate : null
+                            const profit = marketValue !== null && costValue !== null ? marketValue - costValue - feeValue : null
+                            const profitRate = profit !== null && costValue !== null && costValue > 0 ? (profit / costValue) * 100 : null
+                            return (
+                              <tr key={item.id} className="hover:bg-gray-50">
+                                <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">{item.code}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{item.name}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
+                                  {isEditing ? (
+                                    <input type="number" value={editShares} onChange={(e) => setEditShares(e.target.value)} min="0" step="1" autoFocus
+                                      className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  ) : formatShares(item.shares)}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
+                                  {isEditing ? (
+                                    <input type="number" value={editCost} onChange={(e) => setEditCost(e.target.value)} min="0" step="0.01"
+                                      className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  ) : (item.avg_cost !== null ? formatNumber(item.avg_cost, 2) : '-')}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
+                                  {item.last_price !== null ? (
+                                    <span>{formatNumber(item.last_price, 2)}<span className="ml-1 text-xs text-gray-400">({item.last_price_date})</span></span>
+                                  ) : '-'}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold text-gray-900">
+                                  {marketValue !== null ? formatNumber(marketValue, 2) : '-'}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
+                                  {isEditing ? (
+                                    <input type="number" value={editFee} onChange={(e) => setEditFee(e.target.value)} min="0" step="0.01"
+                                      className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  ) : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee, 2) : '-')}
+                                </td>
+                                <td className={`whitespace-nowrap px-4 py-3 text-right text-sm font-semibold ${profitColor(profitRate)}`}>
+                                  {profit !== null ? (
+                                    <span>{(profit >= 0 ? '+' : '') + formatNumber(profit, 2)}
+                                      {profitRate !== null && <span className="ml-1 text-xs">({(profitRate >= 0 ? '+' : '') + formatNumber(profitRate, 2)}%)</span>}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-left text-sm text-gray-700">
+                                  {isEditing ? (
+                                    <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
+                                      placeholder="备注"
+                                      className="w-28 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                                  ) : (item.notes || '-')}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-center text-sm">
+                                  {isEditing ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button onClick={() => handleEditSave(item.id)} disabled={savingEdit}
+                                        className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">{savingEdit ? '保存中' : '保存'}</button>
+                                      <button onClick={handleEditCancel}
+                                        className="rounded bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300">取消</button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center gap-3">
+                                      <button onClick={() => handleEditStart(item)} className="text-blue-600 hover:text-blue-800 hover:underline">编辑</button>
+                                      <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-800 hover:underline">删除</button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+
+            {/* ===== 已清仓区域 — 移至底部，取消折叠，带滚动条 ===== */}
+            {(closedStocks.length > 0 || closedOptions.length > 0) && (
+              <div className="mt-8 space-y-4">
+                <h2 className="text-lg font-bold text-gray-800 border-t pt-6">已清仓记录</h2>
+
+                {/* 已清仓股票 — 按市场分组，每个市场一个区块 */}
+                {marketOrder.map(market => {
+                  const csItems = closedStocksByMarket[market] || []
+                  if (csItems.length === 0) return null
+                  const s = calcStockSummary(csItems)
+                  return (
+                    <div key={`cs-${market}`} className="rounded-lg bg-white shadow">
                       <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-                        <h2 className="text-lg font-bold text-gray-900">{market} 持仓</h2>
-                        {marketSummary && (
-                          <div className="flex gap-4 text-sm">
-                            <span className="text-gray-500">市值: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_market_value)}</span></span>
-                            <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_cost)}</span></span>
-                            <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>{' '}{formatCurrency(marketSummary.total_profit)}</span></span>
-                            <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>
-                              {marketSummary.profit_rate !== null && marketSummary.profit_rate !== undefined
-                                ? (marketSummary.profit_rate >= 0 ? '+' : '') + formatNumber(marketSummary.profit_rate, 2) + '%' : ''}
-                            </span>
-                          </div>
-                        )}
+                        <h3 className="text-base font-bold text-gray-900">{market} 已清仓股票</h3>
+                        <div className="flex gap-4 text-sm">
+                          <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{formatCurrency(s.cost)}</span></span>
+                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '') + formatNumber(s.profit, 2)}</span></span>
+                          <span className={`font-semibold ${profitColor(s.profitRate)}`}>{s.profitRate !== null ? (s.profitRate >= 0 ? '+' : '') + formatNumber(s.profitRate, 2) + '%' : '-'}</span>
+                        </div>
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">代码</th>
-                              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">名称</th>
-                              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">持仓数量</th>
-                              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">平均成本</th>
-                              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">最新价</th>
-                              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">市值</th>
-                              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">盈亏</th>
-                              <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200">
-                            {marketItems.map((item) => {
-                              const isEditing = editingId === item.id
-                              const marketValue = calcMarketValue(item)
-                              const costValue = item.avg_cost !== null && item.shares !== null ? item.avg_cost * item.shares : null
-                              const profit = marketValue !== null && costValue !== null ? marketValue - costValue : null
-                              const profitRate = profit !== null && costValue !== null && costValue > 0 ? (profit / costValue) * 100 : null
-                              return (
-                                <tr key={item.id} className="hover:bg-gray-50">
-                                  <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">{item.code}</td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">{item.name}</td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
-                                    {isEditing ? (
-                                      <input type="number" value={editShares} onChange={(e) => setEditShares(e.target.value)} min="0" step="1" autoFocus
-                                        className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                                    ) : formatShares(item.shares)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
-                                    {isEditing ? (
-                                      <input type="number" value={editCost} onChange={(e) => setEditCost(e.target.value)} min="0" step="0.01"
-                                        className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                                    ) : (item.avg_cost !== null ? formatNumber(item.avg_cost, 2) : '-')}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
-                                    {item.last_price !== null ? (
-                                      <span>{formatNumber(item.last_price, 2)}<span className="ml-1 text-xs text-gray-400">({item.last_price_date})</span></span>
-                                    ) : '-'}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                                    {marketValue !== null ? formatNumber(marketValue, 2) : '-'}
-                                  </td>
-                                  <td className={`whitespace-nowrap px-4 py-3 text-right text-sm font-semibold ${profitColor(profitRate)}`}>
-                                    {profit !== null ? (
-                                      <span>{(profit >= 0 ? '+' : '') + formatNumber(profit, 2)}
-                                        {profitRate !== null && <span className="ml-1 text-xs">({(profitRate >= 0 ? '+' : '') + formatNumber(profitRate, 2)}%)</span>}
-                                      </span>
-                                    ) : '-'}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-center text-sm">
-                                    {isEditing ? (
-                                      <div className="flex items-center justify-center gap-2">
-                                        <button onClick={() => handleEditSave(item.id)} disabled={savingEdit}
-                                          className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">{savingEdit ? '保存中' : '保存'}</button>
-                                        <button onClick={handleEditCancel}
-                                          className="rounded bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300">取消</button>
-                                      </div>
-                                    ) : (
-                                      <div className="flex items-center justify-center gap-3">
-                                        <button onClick={() => handleEditStart(item)} className="text-blue-600 hover:text-blue-800 hover:underline">编辑</button>
-                                        <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-800 hover:underline">删除</button>
-                                      </div>
-                                    )}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
+                      <div className="p-3">
+                        <ClosedStockForm market={market} onAdded={loadData} />
+                        <div className="max-h-[400px] overflow-y-auto rounded border border-gray-100">
+                          <ClosedStockTable items={csItems} onDelete={handleDeleteClosedStock} onUpdate={handleUpdateClosedStock} />
+                        </div>
                       </div>
                     </div>
-                  )}
+                  )
+                })}
 
-                  {/* 已清仓股票（可折叠） */}
-                  <CollapsibleSection
-                    title={`${market} 已清仓股票`}
-                    count={csItems.length}
-                    summary={csItems.length > 0 ? calcStockSummary(csItems) : undefined}
-                  >
-                    <div className="p-3">
-                      <ClosedStockForm market={market} onAdded={loadData} />
-                      <ClosedStockTable items={csItems} onDelete={handleDeleteClosedStock} onUpdate={handleUpdateClosedStock} />
-                    </div>
-                  </CollapsibleSection>
-
-                  {/* 已清仓期权（仅美股、港股） */}
-                  {market !== 'A股' && (
-                    <CollapsibleSection
-                      title={`${market} 已清仓期权`}
-                      count={coItems.length}
-                      summary={coItems.length > 0 ? calcOptionSummary(coItems) : undefined}
-                    >
+                {/* 已清仓期权 — 按市场分组，仅美股和港股 */}
+                {marketOrder.filter(m => m !== 'A股').map(market => {
+                  const coItems = closedOptionsByMarket[market] || []
+                  if (coItems.length === 0) return null
+                  const s = calcOptionSummary(coItems)
+                  return (
+                    <div key={`co-${market}`} className="rounded-lg bg-white shadow">
+                      <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+                        <h3 className="text-base font-bold text-gray-900">{market} 已清仓期权</h3>
+                        <div className="flex gap-4 text-sm">
+                          <span className="text-gray-500">保证金: <span className="font-semibold text-gray-900">{formatCurrency(s.cost)}</span></span>
+                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '') + formatNumber(s.profit, 2)}</span></span>
+                          <span className={`font-semibold ${profitColor(s.profitRate)}`}>{s.profitRate !== null ? (s.profitRate >= 0 ? '+' : '') + formatNumber(s.profitRate, 2) + '%' : '-'}</span>
+                        </div>
+                      </div>
                       <div className="p-3">
                         <ClosedOptionForm market={market} onAdded={loadData} />
-                        <ClosedOptionTable items={coItems} onDelete={handleDeleteClosedOption} onUpdate={handleUpdateClosedOption} />
+                        <div className="max-h-[400px] overflow-y-auto rounded border border-gray-100">
+                          <ClosedOptionTable items={coItems} onDelete={handleDeleteClosedOption} onUpdate={handleUpdateClosedOption} />
+                        </div>
                       </div>
-                    </CollapsibleSection>
-                  )}
-                </div>
-              )
-            })}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -125,6 +125,7 @@ export interface PortfolioItem {
   market: string
   shares: number
   avg_cost: number | null
+  fee: number | null
   last_price: number | null
   last_price_date: string | null
   notes: string | null
@@ -155,6 +156,24 @@ export interface StockSearchResult {
   market_type: string
 }
 
+export interface ScreenerResult {
+  code: string
+  name: string
+  currency: string
+  year_range: string
+  year_count: number
+  avg_gross_margin: number | null
+  avg_net_margin: number | null
+  avg_revenue_yoy: number | null
+}
+
+export interface ScreenerResponse {
+  success: boolean
+  message: string
+  results: ScreenerResult[]
+  total: number
+}
+
 export interface AddCompanyResult {
   success: boolean
   id: number
@@ -175,6 +194,7 @@ export interface ClosedStock {
   shares: number
   buy_price: number | null
   sell_price: number | null
+  fee: number | null
   notes: string | null
   // auto-calculated
   buy_total: number | null
@@ -199,6 +219,7 @@ export interface ClosedOption {
   multiplier: number
   open_premium: number | null
   close_premium: number | null
+  fee: number | null
   notes: string | null
   // auto-calculated
   open_total: number | null
@@ -240,6 +261,7 @@ export const addPortfolioItem = async (item: {
   market: string
   shares: number
   avg_cost?: number
+  fee?: number
   notes?: string
 }): Promise<PortfolioItem> =>
   postRequest('/portfolio', item)
@@ -247,6 +269,7 @@ export const addPortfolioItem = async (item: {
 export const updatePortfolioItem = async (id: number, item: {
   shares?: number
   avg_cost?: number
+  fee?: number
   notes?: string
 }): Promise<{ success: boolean; id: number }> =>
   putRequest(`/portfolio/${id}`, item)
@@ -274,6 +297,7 @@ export const addClosedStock = async (item: {
   shares: number
   buy_price?: number
   sell_price?: number
+  fee?: number
   notes?: string
 }): Promise<{ success: boolean; id: number }> =>
   postRequest('/closed-stocks', item)
@@ -287,6 +311,7 @@ export const updateClosedStock = async (id: number, item: {
   shares?: number
   buy_price?: number
   sell_price?: number
+  fee?: number
   notes?: string
 }): Promise<{ success: boolean; id: number }> =>
   putRequest(`/closed-stocks/${id}`, item)
@@ -310,6 +335,7 @@ export const addClosedOption = async (item: {
   multiplier?: number
   open_premium?: number
   close_premium?: number
+  fee?: number
   notes?: string
 }): Promise<{ success: boolean; id: number }> =>
   postRequest('/closed-options', item)
@@ -327,9 +353,28 @@ export const updateClosedOption = async (id: number, item: {
   multiplier?: number
   open_premium?: number
   close_premium?: number
+  fee?: number
   notes?: string
 }): Promise<{ success: boolean; id: number }> =>
   putRequest(`/closed-options/${id}`, item)
 
 export const deleteClosedOption = async (id: number): Promise<{ success: boolean; id: number }> =>
   deleteRequest(`/closed-options/${id}`)
+
+export const screenStocks = async (params: {
+  market: string
+  start_year: number
+  end_year?: number
+  gross_margin_min?: string | number
+  net_margin_min?: string | number
+  revenue_yoy_min?: string | number
+}): Promise<ScreenerResponse> => {
+  const query = new URLSearchParams()
+  query.set('market', params.market)
+  query.set('start_year', String(params.start_year))
+  if (params.end_year) query.set('end_year', String(params.end_year))
+  if (params.gross_margin_min) query.set('gross_margin_min', String(params.gross_margin_min))
+  if (params.net_margin_min) query.set('net_margin_min', String(params.net_margin_min))
+  if (params.revenue_yoy_min) query.set('revenue_yoy_min', String(params.revenue_yoy_min))
+  return request('/screener?' + query.toString())
+}

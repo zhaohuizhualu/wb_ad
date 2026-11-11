@@ -4,7 +4,7 @@ from loguru import logger
 
 from app.core.database import ensure_schema
 from app.core.config import settings
-from app.api import companies, metrics, business_updates, data_refresh, portfolio, closed_positions
+from app.api import companies, metrics, business_updates, data_refresh, portfolio, closed_positions, screener
 from app.tasks.scheduler import start_scheduler
 
 ensure_schema()
@@ -25,6 +25,7 @@ app.include_router(data_refresh.router, prefix=settings.API_PREFIX)
 app.include_router(portfolio.router, prefix=settings.API_PREFIX)
 app.include_router(metrics.router, prefix=settings.API_PREFIX)
 app.include_router(closed_positions.router, prefix=settings.API_PREFIX)
+app.include_router(screener.router, prefix=settings.API_PREFIX)
 
 @app.on_event("startup")
 def startup_event():

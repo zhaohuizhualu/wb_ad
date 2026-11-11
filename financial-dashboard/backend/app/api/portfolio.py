@@ -21,12 +21,14 @@ class PortfolioCreate(BaseModel):
     market: str
     shares: float
     avg_cost: Optional[float] = None
+    fee: Optional[float] = None
     notes: Optional[str] = None
 
 
 class PortfolioUpdate(BaseModel):
     shares: Optional[float] = None
     avg_cost: Optional[float] = None
+    fee: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -221,6 +223,7 @@ def _init_portfolio_table():
             market VARCHAR NOT NULL DEFAULT 'A股',
             shares FLOAT NOT NULL DEFAULT 0,
             avg_cost FLOAT,
+            fee FLOAT DEFAULT 0,
             last_price FLOAT,
             last_price_date VARCHAR,
             notes TEXT,
@@ -228,6 +231,14 @@ def _init_portfolio_table():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # Add fee column if it doesn't exist (for existing tables)
+    try:
+        cursor.execute('PRAGMA table_info(portfolio)')
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'fee' not in columns:
+            cursor.execute('ALTER TABLE portfolio ADD COLUMN fee FLOAT DEFAULT 0')
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -249,7 +260,7 @@ def list_portfolio():
     conn = _get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, code, name, market, shares, avg_cost, last_price, last_price_date, notes
+        SELECT id, code, name, market, shares, avg_cost, fee, last_price, last_price_date, notes
         FROM portfolio ORDER BY id DESC
     ''')
     rows = cursor.fetchall()
@@ -259,8 +270,8 @@ def list_portfolio():
     for row in rows:
         items.append({
             'id': row[0], 'code': row[1], 'name': row[2], 'market': row[3],
-            'shares': row[4], 'avg_cost': row[5], 'last_price': row[6],
-            'last_price_date': row[7], 'notes': row[8],
+            'shares': row[4], 'avg_cost': row[5], 'fee': row[6],
+            'last_price': row[7], 'last_price_date': row[8], 'notes': row[9],
         })
     return items
 
@@ -282,9 +293,9 @@ def add_portfolio(item: PortfolioCreate):
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO portfolio (code, name, market, shares, avg_cost, last_price, last_price_date, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (full_code, item.name, market, item.shares, item.avg_cost, last_price, last_date, item.notes))
+            INSERT INTO portfolio (code, name, market, shares, avg_cost, fee, last_price, last_price_date, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (full_code, item.name, market, item.shares, item.avg_cost, item.fee or 0, last_price, last_date, item.notes))
         conn.commit()
         new_id = cursor.lastrowid
     except Exception as e:
@@ -295,7 +306,7 @@ def add_portfolio(item: PortfolioCreate):
 
     return {
         'id': new_id, 'code': full_code, 'name': item.name, 'market': market,
-        'shares': item.shares, 'avg_cost': item.avg_cost,
+        'shares': item.shares, 'avg_cost': item.avg_cost, 'fee': item.fee or 0,
         'last_price': last_price, 'last_price_date': last_date, 'notes': item.notes,
     }
 
@@ -318,6 +329,9 @@ def update_portfolio(item_id: int, item: PortfolioUpdate):
     if item.avg_cost is not None:
         updates.append('avg_cost = ?')
         params.append(item.avg_cost)
+    if item.fee is not None:
+        updates.append('fee = ?')
+        params.append(item.fee)
     if item.notes is not None:
         updates.append('notes = ?')
         params.append(item.notes)
@@ -377,7 +391,7 @@ def portfolio_summary():
     conn = _get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT code, name, market, shares, avg_cost, last_price, last_price_date
+        SELECT code, name, market, shares, avg_cost, fee, last_price, last_price_date
         FROM portfolio ORDER BY market, id DESC
     ''')
     rows = cursor.fetchall()
@@ -392,8 +406,8 @@ def portfolio_summary():
     for row in rows:
         item = {
             'code': row[0], 'name': row[1], 'market': row[2],
-            'shares': row[3], 'avg_cost': row[4],
-            'last_price': row[5], 'last_price_date': row[6],
+            'shares': row[3], 'avg_cost': row[4], 'fee': row[5],
+            'last_price': row[6], 'last_price_date': row[7],
         }
         market = item['market']
         if market not in markets:

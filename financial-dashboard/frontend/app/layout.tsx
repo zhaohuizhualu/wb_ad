@@ -32,6 +32,12 @@ export default function RootLayout({
               >
                 我的资产
               </a>
+              <a
+                href="/screener"
+                className="text-gray-600 hover:text-blue-600 hover:underline"
+              >
+                筛选股票
+              </a>
             </div>
           </div>
         </nav>
