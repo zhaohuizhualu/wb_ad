@@ -376,5 +376,26 @@ export const screenStocks = async (params: {
   if (params.gross_margin_min) query.set('gross_margin_min', String(params.gross_margin_min))
   if (params.net_margin_min) query.set('net_margin_min', String(params.net_margin_min))
   if (params.revenue_yoy_min) query.set('revenue_yoy_min', String(params.revenue_yoy_min))
-  return request('/screener?' + query.toString())
+
+  // A-share fetches full market data (5000+ stocks x N years), can take several minutes
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000) // 5 min timeout
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/screener?${query.toString()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    if (!response.ok) {
+      throw new Error(`请求失败: ${response.status}`)
+    }
+    return (await response.json()) as ScreenerResponse
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    if (err.name === 'AbortError') {
+      throw new Error('请求超时（超过5分钟），请缩小年份范围后重试')
+    }
+    throw err
+  }
 }

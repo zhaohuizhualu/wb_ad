@@ -5,12 +5,13 @@
 计算毛利率/净利率/营收同比的历年均值，筛选出满足条件的股票。
 
 数据覆盖：
-- A股：全市场实时拉取（~5000+只），支持任意年份范围
+- A股：全市场实时拉取（~5000+只），使用线程池并行拉取多年数据
 - 港股/美股：从本地数据库筛选（已收录的公司）
 """
 import datetime
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List
 
 import requests
@@ -24,13 +25,6 @@ router = APIRouter()
 
 # 东方财富数据接口
 EASTMONEY_DATA_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
-
-# A股市场代码后缀
-A_SHARE_SUFFIXES = (".SH", ".SZ", ".BJ")
-
-# 港股/美股后缀
-HK_SUFFIX = ".HK"
-US_SUFFIXES = (".O", ".N", ".A")
 
 
 def _create_session():
@@ -76,17 +70,25 @@ def _fetch_a_share_annual_data(
             items = result.get("data") or []
             if not items:
                 break
-            # 只保留 A 股
             for item in items:
                 if item.get("SECURITY_TYPE") == "A股":
                     all_items.append(item)
             if len(items) < 500:
                 break
-            time.sleep(0.15)  # 避免请求过快
         except Exception as e:
             logger.error("拉取 {} 第{}页异常: {}", report_date, page, e)
             break
     return all_items
+
+
+def _fetch_year_data(session, year):
+    """拉取单年数据（用于线程池并行）。每个线程使用独立 session 避免线程安全问题。"""
+    s = _create_session()
+    report_date = f"{year}-12-31"
+    logger.info("拉取 A 股 {} 年报数据...", year)
+    items = _fetch_a_share_annual_data(s, report_date)
+    logger.info("A 股 {} 年报: 获取 {} 条记录", year, len(items))
+    return year, items
 
 
 def _number(value):
@@ -119,7 +121,6 @@ def screen_stocks(
             "total": 0,
         }
 
-    # 计算需要拉取的年份列表
     years = list(range(start_year, end_year + 1))
 
     if market == "A股":
@@ -127,12 +128,12 @@ def screen_stocks(
             years, gross_margin_min, net_margin_min, revenue_yoy_min
         )
     elif market == "港股":
-        results = _screen_db(
-            HK_SUFFIX, years, gross_margin_min, net_margin_min, revenue_yoy_min
+        results = _screen_db_multi(
+            (".HK",), years, gross_margin_min, net_margin_min, revenue_yoy_min
         )
     elif market == "美股":
         results = _screen_db_multi(
-            US_SUFFIXES, years, gross_margin_min, net_margin_min, revenue_yoy_min
+            (".O", ".N", ".A"), years, gross_margin_min, net_margin_min, revenue_yoy_min
         )
     else:
         return {
@@ -142,7 +143,6 @@ def screen_stocks(
             "total": 0,
         }
 
-    # 按毛利率均值降序
     results.sort(
         key=lambda x: (x.get("avg_gross_margin") or 0),
         reverse=True,
@@ -162,21 +162,33 @@ def _screen_a_share_realtime(
     net_margin_min: Optional[float],
     revenue_yoy_min: Optional[float],
 ) -> list:
-    """实时拉取 A 股全市场数据进行筛选。"""
-    session = _create_session()
+    """实时拉取 A 股全市场数据进行筛选（多线程并行）。"""
+    # 使用线程池并行拉取各年数据，最多 4 个线程并发
+    max_workers = min(4, len(years))
+    year_items = {}
 
-    # 按公司分组：code -> {name, yearly_data: {year: {gm, nm, yoy}}}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_year = {
+            executor.submit(_fetch_year_data, None, year): year
+            for year in years
+        }
+        for future in as_completed(future_to_year):
+            year = future_to_year[future]
+            try:
+                yr, items = future.result()
+                year_items[yr] = items
+            except Exception as e:
+                logger.error("拉取 {} 年数据失败: {}", year, e)
+                year_items[year] = []
+
+    # 按公司分组
     company_data = defaultdict(lambda: {
         "name": "",
         "years": {},
     })
 
     for year in years:
-        report_date = f"{year}-12-31"
-        logger.info("拉取 A 股 {} 年报数据...", year)
-        items = _fetch_a_share_annual_data(session, report_date)
-        logger.info("A 股 {} 年报: 获取 {} 条记录", year, len(items))
-
+        items = year_items.get(year, [])
         for item in items:
             code = item.get("SECUCODE", "")
             name = item.get("SECURITY_NAME_ABBR", "")
@@ -190,7 +202,6 @@ def _screen_a_share_realtime(
             revenue = _number(item.get("TOTAL_OPERATE_INCOME"))
             net_profit = _number(item.get("PARENT_NETPROFIT"))
 
-            # 计算净利率 = 净利润 / 营收 * 100
             nm = None
             if revenue and net_profit is not None and revenue > 0:
                 nm = net_profit / revenue * 100
@@ -212,7 +223,6 @@ def _screen_a_share_realtime(
         nm_values = [v["net_margin"] for v in year_data.values() if v["net_margin"] is not None]
         yoy_values = [v["revenue_yoy"] for v in year_data.values() if v["revenue_yoy"] is not None]
 
-        # 至少要有 1 年数据
         if not gm_values and not nm_values:
             continue
 
@@ -220,7 +230,6 @@ def _screen_a_share_realtime(
         avg_nm = sum(nm_values) / len(nm_values) if nm_values else None
         avg_yoy = sum(yoy_values) / len(yoy_values) if yoy_values else None
 
-        # 筛选
         if gross_margin_min is not None:
             if avg_gm is None or avg_gm < gross_margin_min:
                 continue
@@ -246,18 +255,6 @@ def _screen_a_share_realtime(
     return results
 
 
-def _screen_db(
-    suffix: str,
-    years: List[int],
-    gross_margin_min: Optional[float],
-    net_margin_min: Optional[float],
-    revenue_yoy_min: Optional[float],
-) -> list:
-    """从数据库筛选（港股/美股）。"""
-    from sqlalchemy import or_
-    return _screen_db_multi([suffix], years, gross_margin_min, net_margin_min, revenue_yoy_min)
-
-
 def _screen_db_multi(
     suffixes: tuple,
     years: List[int],
@@ -265,7 +262,7 @@ def _screen_db_multi(
     net_margin_min: Optional[float],
     revenue_yoy_min: Optional[float],
 ) -> list:
-    """从数据库筛选（支持多个后缀）。"""
+    """从数据库筛选（港股/美股）。"""
     from sqlalchemy import and_, or_
 
     db = SessionLocal()
