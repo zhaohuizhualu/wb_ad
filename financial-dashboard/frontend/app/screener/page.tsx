@@ -87,6 +87,9 @@ export default function ScreenerPage() {
           <p className="mt-2 text-sm text-gray-500">
             根据财报数据筛选满足条件的股票，支持A股、港股、美股。统计期间各指标历年均值超过设定阈值。
           </p>
+          <p className="mt-1 text-xs text-blue-500">
+            A股为全市场实时拉取（覆盖5000+只股票），筛选可能需要10-30秒；港股/美股从已收录公司中筛选。
+          </p>
         </header>
 
         {/* 筛选表单 */}
@@ -333,7 +336,7 @@ export default function ScreenerPage() {
         {loading && (
           <div className="mt-8 py-20 text-center text-gray-500">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <p className="mt-4">正在筛选...</p>
+            <p className="mt-4">正在实时拉取全市场数据并筛选，请稍候...</p>
           </div>
         )}
       </div>

@@ -1,59 +1,276 @@
 """
-股票筛选 API
+股票筛选 API（实时全市场版）
 
-根据市场、起止年份、毛利率/净利率/营收同比阈值，
-从 core_metrics 年度数据中计算历年均值，筛选出满足条件的公司。
+从东方财富 RPT_LICO_FN_CPD 接口实时拉取全市场年度财务数据，
+计算毛利率/净利率/营收同比的历年均值，筛选出满足条件的股票。
+
+数据覆盖：
+- A股：全市场实时拉取（~5000+只），支持任意年份范围
+- 港股/美股：从本地数据库筛选（已收录的公司）
 """
-from fastapi import APIRouter, Query
-from sqlalchemy import func, and_
+import datetime
+import time
+from collections import defaultdict
 from typing import Optional, List
+
+import requests
+from fastapi import APIRouter, Query
+from loguru import logger
 
 from app.core.database import SessionLocal
 from app.models.models import Company, CoreMetric
 
 router = APIRouter()
 
-MARKET_MAP = {
-    "A股": [".SH", ".SZ", ".BJ"],
-    "港股": [".HK"],
-    "美股": [".O", ".N", ".A"],
-}
+# 东方财富数据接口
+EASTMONEY_DATA_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+
+# A股市场代码后缀
+A_SHARE_SUFFIXES = (".SH", ".SZ", ".BJ")
+
+# 港股/美股后缀
+HK_SUFFIX = ".HK"
+US_SUFFIXES = (".O", ".N", ".A")
+
+
+def _create_session():
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://data.eastmoney.com/"
+    })
+    return s
+
+
+def _fetch_a_share_annual_data(
+    session: requests.Session,
+    report_date: str,
+    max_pages: int = 15,
+) -> list:
+    """拉取某一报告期所有 A 股年度财务数据（分页）。"""
+    all_items = []
+    for page in range(1, max_pages + 1):
+        params = {
+            "reportName": "RPT_LICO_FN_CPD",
+            "columns": (
+                "SECUCODE,SECURITY_NAME_ABBR,XSMLL,YSTZ,SJLTZ,"
+                "TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,SECURITY_TYPE"
+            ),
+            "filter": f"(REPORTDATE='{report_date}')",
+            "pageNumber": page,
+            "pageSize": 500,
+            "sortColumns": "TOTAL_OPERATE_INCOME",
+            "sortTypes": "-1",
+            "source": "WEB",
+            "client": "WEB",
+        }
+        try:
+            resp = session.get(EASTMONEY_DATA_URL, params=params, timeout=20)
+            if resp.status_code != 200:
+                logger.warning("拉取 {} 第{}页失败: HTTP {}", report_date, page, resp.status_code)
+                break
+            data = resp.json()
+            result = data.get("result")
+            if not isinstance(result, dict):
+                break
+            items = result.get("data") or []
+            if not items:
+                break
+            # 只保留 A 股
+            for item in items:
+                if item.get("SECURITY_TYPE") == "A股":
+                    all_items.append(item)
+            if len(items) < 500:
+                break
+            time.sleep(0.15)  # 避免请求过快
+        except Exception as e:
+            logger.error("拉取 {} 第{}页异常: {}", report_date, page, e)
+            break
+    return all_items
+
+
+def _number(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @router.get("/screener")
 def screen_stocks(
     market: str = Query(..., description="市场：A股/港股/美股"),
     start_year: int = Query(..., description="起始年份"),
-    end_year: Optional[int] = Query(None, description="终止年份，空表示截止当前"),
+    end_year: Optional[int] = Query(None, description="终止年份，空=截止当前"),
     gross_margin_min: Optional[float] = Query(None, description="毛利率均值下限%"),
     net_margin_min: Optional[float] = Query(None, description="净利率均值下限%"),
     revenue_yoy_min: Optional[float] = Query(None, description="营收同比均值下限%"),
 ):
-    import datetime
+    """实时拉取全市场数据进行筛选。"""
     if end_year is None:
         end_year = datetime.date.today().year
 
-    suffixes = MARKET_MAP.get(market)
-    if not suffixes:
-        return {"success": False, "message": f"不支持的市场: {market}", "results": []}
+    if start_year > end_year:
+        return {
+            "success": False,
+            "message": f"起始年份({start_year})不能大于终止年份({end_year})",
+            "results": [],
+            "total": 0,
+        }
+
+    # 计算需要拉取的年份列表
+    years = list(range(start_year, end_year + 1))
+
+    if market == "A股":
+        results = _screen_a_share_realtime(
+            years, gross_margin_min, net_margin_min, revenue_yoy_min
+        )
+    elif market == "港股":
+        results = _screen_db(
+            HK_SUFFIX, years, gross_margin_min, net_margin_min, revenue_yoy_min
+        )
+    elif market == "美股":
+        results = _screen_db_multi(
+            US_SUFFIXES, years, gross_margin_min, net_margin_min, revenue_yoy_min
+        )
+    else:
+        return {
+            "success": False,
+            "message": f"不支持的市场: {market}",
+            "results": [],
+            "total": 0,
+        }
+
+    # 按毛利率均值降序
+    results.sort(
+        key=lambda x: (x.get("avg_gross_margin") or 0),
+        reverse=True,
+    )
+
+    return {
+        "success": True,
+        "message": f"找到 {len(results)} 家符合条件的公司",
+        "results": results,
+        "total": len(results),
+    }
+
+
+def _screen_a_share_realtime(
+    years: List[int],
+    gross_margin_min: Optional[float],
+    net_margin_min: Optional[float],
+    revenue_yoy_min: Optional[float],
+) -> list:
+    """实时拉取 A 股全市场数据进行筛选。"""
+    session = _create_session()
+
+    # 按公司分组：code -> {name, yearly_data: {year: {gm, nm, yoy}}}
+    company_data = defaultdict(lambda: {
+        "name": "",
+        "years": {},
+    })
+
+    for year in years:
+        report_date = f"{year}-12-31"
+        logger.info("拉取 A 股 {} 年报数据...", year)
+        items = _fetch_a_share_annual_data(session, report_date)
+        logger.info("A 股 {} 年报: 获取 {} 条记录", year, len(items))
+
+        for item in items:
+            code = item.get("SECUCODE", "")
+            name = item.get("SECURITY_NAME_ABBR", "")
+            if not code:
+                continue
+            info = company_data[code]
+            info["name"] = name
+
+            gm = _number(item.get("XSMLL"))
+            yoy = _number(item.get("YSTZ"))
+            revenue = _number(item.get("TOTAL_OPERATE_INCOME"))
+            net_profit = _number(item.get("PARENT_NETPROFIT"))
+
+            # 计算净利率 = 净利润 / 营收 * 100
+            nm = None
+            if revenue and net_profit is not None and revenue > 0:
+                nm = net_profit / revenue * 100
+
+            info["years"][year] = {
+                "gross_margin": gm,
+                "net_margin": nm,
+                "revenue_yoy": yoy,
+            }
+
+    # 计算历年均值并筛选
+    results = []
+    for code, info in company_data.items():
+        year_data = info["years"]
+        if not year_data:
+            continue
+
+        gm_values = [v["gross_margin"] for v in year_data.values() if v["gross_margin"] is not None]
+        nm_values = [v["net_margin"] for v in year_data.values() if v["net_margin"] is not None]
+        yoy_values = [v["revenue_yoy"] for v in year_data.values() if v["revenue_yoy"] is not None]
+
+        # 至少要有 1 年数据
+        if not gm_values and not nm_values:
+            continue
+
+        avg_gm = sum(gm_values) / len(gm_values) if gm_values else None
+        avg_nm = sum(nm_values) / len(nm_values) if nm_values else None
+        avg_yoy = sum(yoy_values) / len(yoy_values) if yoy_values else None
+
+        # 筛选
+        if gross_margin_min is not None:
+            if avg_gm is None or avg_gm < gross_margin_min:
+                continue
+        if net_margin_min is not None:
+            if avg_nm is None or avg_nm < net_margin_min:
+                continue
+        if revenue_yoy_min is not None:
+            if avg_yoy is None or avg_yoy < revenue_yoy_min:
+                continue
+
+        years_sorted = sorted(year_data.keys())
+        results.append({
+            "code": code,
+            "name": info["name"],
+            "currency": "CNY",
+            "year_range": f"{years_sorted[0]}-{years_sorted[-1]}",
+            "year_count": len(years_sorted),
+            "avg_gross_margin": round(avg_gm, 2) if avg_gm is not None else None,
+            "avg_net_margin": round(avg_nm, 2) if avg_nm is not None else None,
+            "avg_revenue_yoy": round(avg_yoy, 2) if avg_yoy is not None else None,
+        })
+
+    return results
+
+
+def _screen_db(
+    suffix: str,
+    years: List[int],
+    gross_margin_min: Optional[float],
+    net_margin_min: Optional[float],
+    revenue_yoy_min: Optional[float],
+) -> list:
+    """从数据库筛选（港股/美股）。"""
+    from sqlalchemy import or_
+    return _screen_db_multi([suffix], years, gross_margin_min, net_margin_min, revenue_yoy_min)
+
+
+def _screen_db_multi(
+    suffixes: tuple,
+    years: List[int],
+    gross_margin_min: Optional[float],
+    net_margin_min: Optional[float],
+    revenue_yoy_min: Optional[float],
+) -> list:
+    """从数据库筛选（支持多个后缀）。"""
+    from sqlalchemy import and_, or_
 
     db = SessionLocal()
     try:
-        # 查询所有在该市场、指定年份范围内的公司年度指标
-        conditions = [
-            CoreMetric.report_type == "annual",
-            CoreMetric.report_year >= start_year,
-            CoreMetric.report_year <= end_year,
-        ]
-
-        # 构建市场过滤：company.code 以指定后缀结尾
-        from sqlalchemy import or_
-        code_filters = []
-        for suffix in suffixes:
-            code_filters.append(Company.code.endswith(suffix))
-        conditions.append(or_(*code_filters))
-
-        # 联表查询
+        code_filters = [Company.code.endswith(s) for s in suffixes]
         query = (
             db.query(
                 Company.id,
@@ -66,22 +283,20 @@ def screen_stocks(
                 CoreMetric.revenue_yoy,
             )
             .join(Company, Company.id == CoreMetric.company_id)
-            .filter(and_(*conditions))
+            .filter(and_(
+                CoreMetric.report_type == "annual",
+                CoreMetric.report_year >= years[0],
+                CoreMetric.report_year <= years[-1],
+                or_(*code_filters),
+            ))
             .all()
         )
 
         if not query:
-            return {
-                "success": True,
-                "message": f"未找到 {market} 在 {start_year}-{end_year} 年范围内的数据",
-                "results": [],
-                "total": 0,
-            }
+            return []
 
-        # 按公司分组，计算各指标的历年均值
-        from collections import defaultdict
         company_data = defaultdict(lambda: {
-            "code": "", "name": "", "currency": "",
+            "code": "", "name": "", "currency": "CNY",
             "gross_margins": [], "net_margins": [], "revenue_yoys": [],
             "years": set(),
         })
@@ -100,16 +315,13 @@ def screen_stocks(
             if ryoy is not None:
                 info["revenue_yoys"].append(ryoy)
 
-        # 计算均值并筛选
         results = []
         for cid, info in company_data.items():
             avg_gm = sum(info["gross_margins"]) / len(info["gross_margins"]) if info["gross_margins"] else None
             avg_nm = sum(info["net_margins"]) / len(info["net_margins"]) if info["net_margins"] else None
             avg_ryoy = sum(info["revenue_yoys"]) / len(info["revenue_yoys"]) if info["revenue_yoys"] else None
             years_sorted = sorted(info["years"])
-            year_count = len(years_sorted)
 
-            # 筛选条件
             if gross_margin_min is not None:
                 if avg_gm is None or avg_gm < gross_margin_min:
                     continue
@@ -125,23 +337,12 @@ def screen_stocks(
                 "name": info["name"],
                 "currency": info["currency"],
                 "year_range": f"{years_sorted[0]}-{years_sorted[-1]}",
-                "year_count": year_count,
+                "year_count": len(years_sorted),
                 "avg_gross_margin": round(avg_gm, 2) if avg_gm is not None else None,
                 "avg_net_margin": round(avg_nm, 2) if avg_nm is not None else None,
                 "avg_revenue_yoy": round(avg_ryoy, 2) if avg_ryoy is not None else None,
             })
 
-        # 按毛利率均值降序排列
-        results.sort(
-            key=lambda x: (x["avg_gross_margin"] or 0),
-            reverse=True,
-        )
-
-        return {
-            "success": True,
-            "message": f"找到 {len(results)} 家符合条件的公司",
-            "results": results,
-            "total": len(results),
-        }
+        return results
     finally:
         db.close()
