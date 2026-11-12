@@ -118,10 +118,14 @@ class EastMoneyFetcher:
         for row in rows:
             if row.get("REPORT_TYPE") != "年报":
                 continue
+            # 优先使用 STD_REPORT_DATE 提取财年（美股 FY 与自然年不同，
+            # 如英伟达 FY2025 年报 REPORT_DATE=2026-01-25，但 STD_REPORT_DATE=2025-12-31）
+            std_date = row.get("STD_REPORT_DATE") or ""
             report_date = row.get("REPORT_DATE") or ""
-            if len(report_date) < 4:
+            date_str = std_date if len(std_date) >= 4 else report_date
+            if len(date_str) < 4:
                 continue
-            year = int(report_date[:4])
+            year = int(date_str[:4])
             if year < 2015:
                 continue
             entry = cash_by_year.get(year)
@@ -354,14 +358,17 @@ class EastMoneyFetcher:
             )
 
         for row in rows:
-            report_date = row.get("REPORT_DATE") or ""
-            if len(report_date) < 4:
+            report_type = row.get("REPORT_TYPE") or ""
+            # 美股财年可能与自然年不同（如英伟达 FY 截止 1 月），
+            # 必须从 REPORT_TYPE 提取年份，而非 REPORT_DATE。
+            # REPORT_TYPE 格式: "2025/FY", "2026/Q1", "2026/Q2" 等
+            type_year_match = re.match(r"^(\d{4})/", report_type)
+            if not type_year_match:
                 continue
-            year = int(report_date[:4])
+            year = int(type_year_match.group(1))
             if year < 2015:
                 continue
 
-            report_type = row.get("REPORT_TYPE") or ""
             if row.get("DATE_TYPE_CODE") == "001" or report_type.endswith("/FY"):
                 result["income"][year] = {
                     "营业收入": row.get("OPERATE_INCOME"),

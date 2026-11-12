@@ -36,6 +36,18 @@ class Settings:
             "logo_url": "/logos/PDD.O.svg",
             "currency": "CNY",
         },
+        {
+            "code": "NVDA.O",
+            "name": "英伟达",
+            "logo_url": "/logos/NVDA.O.svg",
+            "currency": "USD",
+        },
+        {
+            "code": "AAPL.O",
+            "name": "苹果",
+            "logo_url": "/logos/AAPL.O.svg",
+            "currency": "USD",
+        },
     ]
     TZ = "Asia/Shanghai"
     UPDATE_HOUR = 6
