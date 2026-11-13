@@ -74,7 +74,48 @@ function getMarketRate(market: string, summary: PortfolioSummary | null): number
   return 1.0
 }
 
+/** 根据市场获取货币符号 */
+function getMarketCurrency(market: string): string {
+  if (market === '港股') return 'HK$'
+  if (market === '美股') return 'US$'
+  return '¥'
+}
+
+/** 根据市场格式化原始货币金额（不换算人民币） */
+function formatNativeCurrency(value: number | null, market: string): string {
+  if (value === null || value === undefined) return '-'
+  const prefix = getMarketCurrency(market)
+  return formatNumber(value, 2)
+}
+
 function round2(v: number): number { return Math.round(v * 100) / 100 }
+
+/** 备注单元格：截断显示，点击展开 */
+function NotesCell({ notes }: { notes: string | null | undefined }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!notes) return <span className="text-gray-400">-</span>
+  const TRUNCATE_LENGTH = 10
+  if (notes.length <= TRUNCATE_LENGTH || expanded) {
+    return (
+      <span
+        className="cursor-pointer text-gray-700"
+        title={expanded ? '点击收起' : '点击展开全部'}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {notes}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="cursor-pointer text-gray-700"
+      title="点击展开全部"
+      onClick={() => setExpanded(true)}
+    >
+      {notes.slice(0, TRUNCATE_LENGTH)}<span className="text-blue-500">...</span>
+    </span>
+  )
+}
 
 // ---------- Closed Stock Form ----------
 function ClosedStockForm({ market, onAdded }: { market: string; onAdded: () => void }) {
@@ -329,6 +370,7 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
         <tbody className="divide-y divide-gray-100">
           {items.map(item => {
             const isEditing = editingId === item.id
+            const cs = getMarketCurrency(item.market)
             return (
               <tr key={item.id} className="hover:bg-gray-50">
                 <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-900">
@@ -347,18 +389,18 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
                   {isEditing ? <EditCell value={editData.shares || ''} onChange={v => setEditData({...editData, shares: v})} type="number" /> : formatShares(item.shares)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.buy_price || ''} onChange={v => setEditData({...editData, buy_price: v})} type="number" /> : (item.buy_price !== null ? formatNumber(item.buy_price) : '-')}
+                  {isEditing ? <EditCell value={editData.buy_price || ''} onChange={v => setEditData({...editData, buy_price: v})} type="number" /> : (item.buy_price !== null ? `${cs}${formatNumber(item.buy_price)}` : '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.sell_price || ''} onChange={v => setEditData({...editData, sell_price: v})} type="number" /> : (item.sell_price !== null ? formatNumber(item.sell_price) : '-')}
+                  {isEditing ? <EditCell value={editData.sell_price || ''} onChange={v => setEditData({...editData, sell_price: v})} type="number" /> : (item.sell_price !== null ? `${cs}${formatNumber(item.sell_price)}` : '-')}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.buy_total !== null ? formatNumber(item.buy_total) : '-'}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.sell_total !== null ? formatNumber(item.sell_total) : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.buy_total !== null ? `${cs}${formatNumber(item.buy_total)}` : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.sell_total !== null ? `${cs}${formatNumber(item.sell_total)}` : '-'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee) : '-')}
+                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? `${cs}${formatNumber(item.fee)}` : '-')}
                 </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.profit)}`}>
-                  {item.profit !== null ? (item.profit >= 0 ? '+' : '') + formatNumber(item.profit) : '-'}
+                  {item.profit !== null ? (item.profit >= 0 ? '+' : '-') + cs + formatNumber(Math.abs(item.profit)) : '-'}
                 </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.profit_rate)}`}>
                   {item.profit_rate !== null ? (item.profit_rate >= 0 ? '+' : '') + formatNumber(item.profit_rate) + '%' : '-'}
@@ -367,8 +409,8 @@ function ClosedStockTable({ items, onDelete, onUpdate }: { items: ClosedStock[];
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs ${profitColor(item.annualized)}`}>
                   {item.annualized !== null ? (item.annualized >= 0 ? '+' : '') + formatNumber(item.annualized) + '%' : '-'}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-left text-xs text-gray-700">
-                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : (item.notes || '-')}
+                <td className="px-3 py-2 text-left text-xs text-gray-700">
+                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : <NotesCell notes={item.notes} />}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-center text-xs">
                   {isEditing ? (
@@ -471,6 +513,7 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
         <tbody className="divide-y divide-gray-100">
           {items.map(item => {
             const isEditing = editingId === item.id
+            const cs = getMarketCurrency(item.market)
             return (
               <tr key={item.id} className="hover:bg-gray-50">
                 <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-gray-900">
@@ -491,7 +534,7 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
                   ) : (item.direction || '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.strike_price || ''} onChange={v => setEditData({...editData, strike_price: v})} type="number" /> : (item.strike_price !== null ? formatNumber(item.strike_price) : '-')}
+                  {isEditing ? <EditCell value={editData.strike_price || ''} onChange={v => setEditData({...editData, strike_price: v})} type="number" /> : (item.strike_price !== null ? `${cs}${formatNumber(item.strike_price)}` : '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-500">
                   {isEditing ? <input type="date" value={editData.open_date || ''} onChange={e => setEditData({...editData, open_date: e.target.value})} className="rounded border border-gray-300 px-1 py-0.5 text-xs" /> : (item.open_date || '-')}
@@ -506,20 +549,20 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
                   {isEditing ? <EditCell value={editData.multiplier || ''} onChange={v => setEditData({...editData, multiplier: v})} type="number" /> : item.multiplier}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.open_premium || ''} onChange={v => setEditData({...editData, open_premium: v})} type="number" /> : (item.open_premium !== null ? formatNumber(item.open_premium) : '-')}
+                  {isEditing ? <EditCell value={editData.open_premium || ''} onChange={v => setEditData({...editData, open_premium: v})} type="number" /> : (item.open_premium !== null ? `${cs}${formatNumber(item.open_premium)}` : '-')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.close_premium || ''} onChange={v => setEditData({...editData, close_premium: v})} type="number" /> : (item.close_premium !== null ? formatNumber(item.close_premium) : '-')}
+                  {isEditing ? <EditCell value={editData.close_premium || ''} onChange={v => setEditData({...editData, close_premium: v})} type="number" /> : (item.close_premium !== null ? `${cs}${formatNumber(item.close_premium)}` : '-')}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.open_total !== null ? formatNumber(item.open_total) : '-'}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.close_total !== null ? formatNumber(item.close_total) : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.open_total !== null ? `${cs}${formatNumber(item.open_total)}` : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">{item.close_total !== null ? `${cs}${formatNumber(item.close_total)}` : '-'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-900">
-                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee) : '-')}
+                  {isEditing ? <EditCell value={editData.fee || ''} onChange={v => setEditData({...editData, fee: v})} type="number" /> : (item.fee !== null && item.fee !== 0 ? `${cs}${formatNumber(item.fee)}` : '-')}
                 </td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.net_premium)}`}>
-                  {item.net_premium !== null ? (item.net_premium >= 0 ? '+' : '') + formatNumber(item.net_premium) : '-'}
+                  {item.net_premium !== null ? (item.net_premium >= 0 ? '+' : '-') + cs + formatNumber(Math.abs(item.net_premium)) : '-'}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-500">{item.margin !== null ? formatNumber(item.margin) : '-'}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right text-xs text-gray-500">{item.margin !== null ? `${cs}${formatNumber(item.margin)}` : '-'}</td>
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs font-semibold ${profitColor(item.profit_rate)}`}>
                   {item.profit_rate !== null ? (item.profit_rate >= 0 ? '+' : '') + formatNumber(item.profit_rate) + '%' : '-'}
                 </td>
@@ -527,8 +570,8 @@ function ClosedOptionTable({ items, onDelete, onUpdate }: { items: ClosedOption[
                 <td className={`whitespace-nowrap px-3 py-2 text-right text-xs ${profitColor(item.annualized)}`}>
                   {item.annualized !== null ? (item.annualized >= 0 ? '+' : '') + formatNumber(item.annualized) + '%' : '-'}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-left text-xs text-gray-700">
-                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : (item.notes || '-')}
+                <td className="px-3 py-2 text-left text-xs text-gray-700">
+                  {isEditing ? <EditCell value={editData.notes || ''} onChange={v => setEditData({...editData, notes: v})} placeholder="备注" /> : <NotesCell notes={item.notes} />}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-center text-xs">
                   {isEditing ? (
@@ -1016,9 +1059,9 @@ export default function PortfolioPage() {
                       <h2 className="text-lg font-bold text-gray-900">{market} 持仓</h2>
                       {marketSummary && (
                         <div className="flex gap-4 text-sm">
-                          <span className="text-gray-500">市值: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_market_value)}</span></span>
-                          <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_cost)}</span></span>
-                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>{' '}{formatCurrency(marketSummary.total_profit)}</span></span>
+                          <span className="text-gray-500">市值<span className="text-xs text-gray-400">(¥)</span>: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_market_value)}</span></span>
+                          <span className="text-gray-500">成本<span className="text-xs text-gray-400">(¥)</span>: <span className="font-semibold text-gray-900">{formatCurrency(marketSummary.total_cost)}</span></span>
+                          <span className="text-gray-500">盈亏<span className="text-xs text-gray-400">(¥)</span>: <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>{' '}{formatCurrency(marketSummary.total_profit)}</span></span>
                           <span className={`font-semibold ${profitColor(marketSummary.profit_rate)}`}>
                             {marketSummary.profit_rate !== null && marketSummary.profit_rate !== undefined
                               ? (marketSummary.profit_rate >= 0 ? '+' : '') + formatNumber(marketSummary.profit_rate, 2) + '%' : ''}
@@ -1045,12 +1088,10 @@ export default function PortfolioPage() {
                         <tbody className="divide-y divide-gray-200">
                           {marketItems.map((item) => {
                             const isEditing = editingId === item.id
-                            const rate = getMarketRate(item.market, summary)
-                            const marketValueRaw = calcMarketValue(item)
-                            const costValueRaw = item.avg_cost !== null && item.shares !== null ? item.avg_cost * item.shares : null
-                            const feeValue = (item.fee || 0) * rate
-                            const marketValue = marketValueRaw !== null ? marketValueRaw * rate : null
-                            const costValue = costValueRaw !== null ? costValueRaw * rate : null
+                            const currencySymbol = getMarketCurrency(item.market)
+                            const marketValue = calcMarketValue(item)
+                            const costValue = item.avg_cost !== null && item.shares !== null ? item.avg_cost * item.shares : null
+                            const feeValue = item.fee || 0
                             const profit = marketValue !== null && costValue !== null ? marketValue - costValue - feeValue : null
                             const profitRate = profit !== null && costValue !== null && costValue > 0 ? (profit / costValue) * 100 : null
                             return (
@@ -1067,35 +1108,35 @@ export default function PortfolioPage() {
                                   {isEditing ? (
                                     <input type="number" value={editCost} onChange={(e) => setEditCost(e.target.value)} min="0" step="0.01"
                                       className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                                  ) : (item.avg_cost !== null ? formatNumber(item.avg_cost, 2) : '-')}
+                                  ) : (item.avg_cost !== null ? `${currencySymbol}${formatNumber(item.avg_cost, 2)}` : '-')}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
                                   {item.last_price !== null ? (
-                                    <span>{formatNumber(item.last_price, 2)}<span className="ml-1 text-xs text-gray-400">({item.last_price_date})</span></span>
+                                    <span>{currencySymbol}{formatNumber(item.last_price, 2)}<span className="ml-1 text-xs text-gray-400">({item.last_price_date})</span></span>
                                   ) : '-'}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-semibold text-gray-900">
-                                  {marketValue !== null ? formatNumber(marketValue, 2) : '-'}
+                                  {marketValue !== null ? `${currencySymbol}${formatNumber(marketValue, 2)}` : '-'}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-900">
                                   {isEditing ? (
                                     <input type="number" value={editFee} onChange={(e) => setEditFee(e.target.value)} min="0" step="0.01"
                                       className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                                  ) : (item.fee !== null && item.fee !== 0 ? formatNumber(item.fee, 2) : '-')}
+                                  ) : (item.fee !== null && item.fee !== 0 ? `${currencySymbol}${formatNumber(item.fee, 2)}` : '-')}
                                 </td>
                                 <td className={`whitespace-nowrap px-4 py-3 text-right text-sm font-semibold ${profitColor(profitRate)}`}>
                                   {profit !== null ? (
-                                    <span>{(profit >= 0 ? '+' : '') + formatNumber(profit, 2)}
+                                    <span>{(profit >= 0 ? '+' : '')}{currencySymbol}{formatNumber(Math.abs(profit), 2)}
                                       {profitRate !== null && <span className="ml-1 text-xs">({(profitRate >= 0 ? '+' : '') + formatNumber(profitRate, 2)}%)</span>}
                                     </span>
                                   ) : '-'}
                                 </td>
-                                <td className="whitespace-nowrap px-4 py-3 text-left text-sm text-gray-700">
+                                <td className="px-4 py-3 text-left text-sm text-gray-700">
                                   {isEditing ? (
                                     <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
                                       placeholder="备注"
                                       className="w-28 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                                  ) : (item.notes || '-')}
+                                  ) : <NotesCell notes={item.notes} />}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-center text-sm">
                                   {isEditing ? (
@@ -1138,8 +1179,8 @@ export default function PortfolioPage() {
                       <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                         <h3 className="text-base font-bold text-gray-900">{market} 已清仓股票</h3>
                         <div className="flex gap-4 text-sm">
-                          <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{formatCurrency(s.cost)}</span></span>
-                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '') + formatNumber(s.profit, 2)}</span></span>
+                          <span className="text-gray-500">成本: <span className="font-semibold text-gray-900">{getMarketCurrency(market)}{formatNumber(s.cost, 2)}</span></span>
+                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '-')}{getMarketCurrency(market)}{formatNumber(Math.abs(s.profit), 2)}</span></span>
                           <span className={`font-semibold ${profitColor(s.profitRate)}`}>{s.profitRate !== null ? (s.profitRate >= 0 ? '+' : '') + formatNumber(s.profitRate, 2) + '%' : '-'}</span>
                         </div>
                       </div>
@@ -1163,8 +1204,8 @@ export default function PortfolioPage() {
                       <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                         <h3 className="text-base font-bold text-gray-900">{market} 已清仓期权</h3>
                         <div className="flex gap-4 text-sm">
-                          <span className="text-gray-500">保证金: <span className="font-semibold text-gray-900">{formatCurrency(s.cost)}</span></span>
-                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '') + formatNumber(s.profit, 2)}</span></span>
+                          <span className="text-gray-500">保证金: <span className="font-semibold text-gray-900">{getMarketCurrency(market)}{formatNumber(s.cost, 2)}</span></span>
+                          <span className="text-gray-500">盈亏: <span className={`font-semibold ${profitColor(s.profitRate)}`}>{(s.profit >= 0 ? '+' : '-')}{getMarketCurrency(market)}{formatNumber(Math.abs(s.profit), 2)}</span></span>
                           <span className={`font-semibold ${profitColor(s.profitRate)}`}>{s.profitRate !== null ? (s.profitRate >= 0 ? '+' : '') + formatNumber(s.profitRate, 2) + '%' : '-'}</span>
                         </div>
                       </div>
