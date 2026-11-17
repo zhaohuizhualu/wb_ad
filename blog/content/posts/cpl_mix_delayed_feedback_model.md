@@ -101,7 +101,7 @@ one-hot / multi-hot 特征 ID
   -> 推理时 +log(0.05) -> sigmoid × outter_cali
 ```
 
-![PEPNET_STAR 模型结构](/images/pepnet_star_architecture.png)
+![PEPNET_STAR 模型结构](/blog/images/pepnet_star_architecture.png)
 
 主要超参：embedding_size=8，MLP=[128,128,128,32]，BatchNorm，Adagrad lr=0.02，单 epoch，batch_size=1024。
 
