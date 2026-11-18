@@ -9,6 +9,8 @@ tags:
   - 深度学习
 ---
 
+> 2026-11-17 更新：补充按源码与配置精确校验过的模型结构图与张量维度表；修正 PPNet slot 数量（13 个）。
+
 ## 为什么写这篇文章
 
 微博广告的 CPL（Cost Per Lead，按转化收费）投放体系里，精排模型承担的角色是：对召回和粗排筛出的候选广告，预估"这次曝光最终会不会带来深转（引导/转化）"，预估分直接决定排序和出价。这个模型（内部代号 `star_multimodal_long_seq`）在一个真实业务里持续跑了很久，迭代出不少有意思的工程决策。本文完整拆解它的结构、训练流程和背后的取舍，适合想了解工业级精排模型全貌的读者。
@@ -47,6 +49,22 @@ tags:
               logits → sigmoid → pred
 ```
 
+结构总览图（依据 `multi_scene_multimodal_long_seq.py` 源码与 `cpl_ctr_base/conf/model.yaml` 精确校验，维度为当前配置的实际值）：
+
+![star_multimodal_long_seq 模型结构](/blog/images/star_multimodal_long_seq_architecture.png)
+
+图中各环节的张量维度：
+
+| 环节 | 维度 | 说明 |
+| --- | --- | --- |
+| 输入 slot | 139 one-hot + 76 multi-hot | 合并去重后共 215 个 slot，multi-hot 每 slot ≤ 200 item |
+| Deep 展平 | 215 × 8 = 1720 | 全部 deep slot 的 embedding 拼接 |
+| + SimTier | +21 → 1741 | 直方图 20 桶 + valid_ratio，**在 BN 之前** concat |
+| + 注意力输出 | +32 → 1773 | ESU 输出，**在 BN 之后** concat |
+| STAR FCN | 1773 → 128 → 128 → 128 → 32 | 每层每域独立 kernel/bias |
+| PPNet 门控上下文 | 512 + 104 = 616 | stop_grad(deep 输入) 的 512 维投影 + 13 个 ppnet slot 的 BN 后 embedding |
+| 末层融合 | 139 + 8 + 32 + 48 = 227 | 一阶 / FM / FCN / auxiliary（6 slot × 8） |
+
 下面逐个组件讲清楚"为什么需要它"。
 
 ---
@@ -77,9 +95,9 @@ STAR 的做法是 FCN 每层的 kernel/bias **按域独立**（`domain_kernel_{d
 
 ---
 
-## 三、PPNet：用 12 个身份特征给整个网络"调音"
+## 三、PPNet：用 13 个身份特征给整个网络"调音"
 
-PPNet（Personalized Permute Net）的思路：选一批**身份类 slot**（本模型用 `ppnet_slot = [2,3,43,6,32,33,34,35,250,50,841,842,843]`，即广告主、广告计划、优化目标、创意语义码等 12 个），它们的 embedding 拼接过 BN，再和 `stop_gradient` 的 deep 输入（512 维投影）一起进 2 层 MLP，输出 `2·sigmoid(x)` ∈ (0,2) 的门控向量，**逐层逐维**乘到 STAR FCN 的每一层上。
+PPNet（Personalized Permute Net）的思路：选一批**身份类 slot**（本模型用 `ppnet_slot = [2,3,43,6,32,33,34,35,250,50,841,842,843]`，即广告主、广告计划、优化目标、创意语义码等 13 个），它们的 embedding 拼接过 BN，再和 `stop_gradient` 的 deep 输入（512 维投影）一起进 2 层 MLP，输出 `2·sigmoid(x)` ∈ (0,2) 的门控向量，**逐层逐维**乘到 STAR FCN 的每一层上。
 
 直观理解：同一套网络骨架，对"美妆广告主的样本"和"游戏广告主的样本"施加不同的变换强度。广告主 ID 类特征不直接参与预测，而是作为"个性化调制信号"——这比把它们简单塞进 deep 输入更高效，因为门控作用在了每一层。
 
