@@ -90,30 +90,35 @@ function formatNativeCurrency(value: number | null, market: string): string {
 
 function round2(v: number): number { return Math.round(v * 100) / 100 }
 
-/** 备注单元格：截断显示，点击展开 */
+/** 备注单元格：单行截断显示，点击展开浮层查看全部 */
 function NotesCell({ notes }: { notes: string | null | undefined }) {
   const [expanded, setExpanded] = useState(false)
+  const cellRef = useRef<HTMLDivElement>(null)
   if (!notes) return <span className="text-gray-400">-</span>
-  const TRUNCATE_LENGTH = 10
-  if (notes.length <= TRUNCATE_LENGTH || expanded) {
-    return (
-      <span
-        className="cursor-pointer text-gray-700"
-        title={expanded ? '点击收起' : '点击展开全部'}
+
+  return (
+    <div className="relative" ref={cellRef}>
+      <div
+        className="cursor-pointer truncate text-gray-700 hover:text-blue-600"
+        style={{ maxWidth: '120px' }}
+        title="点击查看全部"
         onClick={() => setExpanded(!expanded)}
       >
         {notes}
-      </span>
-    )
-  }
-  return (
-    <span
-      className="cursor-pointer text-gray-700"
-      title="点击展开全部"
-      onClick={() => setExpanded(true)}
-    >
-      {notes.slice(0, TRUNCATE_LENGTH)}<span className="text-blue-500">...</span>
-    </span>
+      </div>
+      {expanded && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setExpanded(false)} />
+          <div
+            className="absolute z-50 mt-1 max-w-sm rounded-md border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg"
+            style={{ left: 0, top: '100%' }}
+            onClick={() => setExpanded(false)}
+          >
+            {notes}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
