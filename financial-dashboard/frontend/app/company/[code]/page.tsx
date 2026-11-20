@@ -64,6 +64,7 @@ export default function CompanyDetail({
   const [businessUpdates, setBusinessUpdates] = useState<BusinessUpdate[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [autoFetching, setAutoFetching] = useState(false)
   const [error, setError] = useState('')
   const [refreshMsg, setRefreshMsg] = useState('')
 
@@ -80,16 +81,49 @@ export default function CompanyDetail({
         ])
         if (!active) return
 
-        setCompany(companies.find((item) => item.code === code) ?? null)
+        const foundCompany = companies.find((item) => item.code === code) ?? null
+        setCompany(foundCompany)
         setMetrics([...annualMetrics].reverse())
 
-        const [quarterlyMetrics, updates] = await Promise.all([
-          getQuarterlyMetrics(code).catch(() => [] as QuarterlyMetric[]),
-          getBusinessUpdates(code).catch(() => [] as BusinessUpdate[]),
-        ])
-        if (active) {
-          setQuarterly(quarterlyMetrics)
-          setBusinessUpdates(updates)
+        // 如果没有年度财务数据，自动触发数据加载
+        if (annualMetrics.length === 0 && foundCompany) {
+          if (active) {
+            setAutoFetching(true)
+          }
+          try {
+            const result = await refreshCompanyData(code)
+            if (!active) return
+            // 重新拉取数据
+            const [refreshedMetrics, quarterlyMetrics, updates] = await Promise.all([
+              getMetrics(code),
+              getQuarterlyMetrics(code).catch(() => [] as QuarterlyMetric[]),
+              getBusinessUpdates(code).catch(() => [] as BusinessUpdate[]),
+            ])
+            if (active) {
+              setMetrics([...refreshedMetrics].reverse())
+              setQuarterly(quarterlyMetrics)
+              setBusinessUpdates(updates)
+              if (refreshedMetrics.length === 0) {
+                setError('未能获取到财务数据，请稍后手动刷新重试')
+              }
+            }
+          } catch (fetchErr) {
+            console.error('自动拉取财务数据失败:', fetchErr)
+            if (active) {
+              setError('财务数据自动加载失败，请稍后点击「刷新数据」重试')
+            }
+          } finally {
+            if (active) setAutoFetching(false)
+          }
+        } else {
+          const [quarterlyMetrics, updates] = await Promise.all([
+            getQuarterlyMetrics(code).catch(() => [] as QuarterlyMetric[]),
+            getBusinessUpdates(code).catch(() => [] as BusinessUpdate[]),
+          ])
+          if (active) {
+            setQuarterly(quarterlyMetrics)
+            setBusinessUpdates(updates)
+          }
         }
       } catch (err) {
         console.error('获取数据失败:', err)
@@ -136,7 +170,35 @@ export default function CompanyDetail({
   }
 
   if (loading) {
-    return <div className="p-8">加载中...</div>
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+          <p className="text-gray-600">页面加载中...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (autoFetching) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-6">
+            <Link href="/" className="text-blue-600 hover:underline">
+              ← 返回首页
+            </Link>
+          </div>
+          <div className="flex flex-col items-center justify-center rounded-lg bg-white p-16 shadow">
+            <div className="mx-auto mb-6 h-16 w-16 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+            <h2 className="text-xl font-semibold text-gray-900">数据加载中</h2>
+            <p className="mt-2 text-gray-500">
+              正在从东方财富拉取 {company?.name || code} 的财务数据，请稍候...
+            </p>
+          </div>
+        </div>
+      </main>
+    )
   }
 
   if (error) {
@@ -150,6 +212,47 @@ export default function CompanyDetail({
           </div>
           <div className="rounded-lg bg-white p-10 text-center text-red-500 shadow">
             {error}
+          </div>
+        </div>
+      </main>
+    )
+  }
+
+  if (!company) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-6">
+            <Link href="/" className="text-blue-600 hover:underline">
+              ← 返回首页
+            </Link>
+          </div>
+          <div className="rounded-lg bg-white p-10 text-center text-gray-500 shadow">
+            未找到公司 {code}
+          </div>
+        </div>
+      </main>
+    )
+  }
+
+  if (metrics.length === 0) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-6">
+            <Link href="/" className="text-blue-600 hover:underline">
+              ← 返回首页
+            </Link>
+          </div>
+          <div className="flex flex-col items-center justify-center rounded-lg bg-white p-16 shadow">
+            <p className="text-gray-600">{company.name} 暂无财务数据</p>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="mt-4 rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {refreshing ? '正在刷新...' : '刷新数据'}
+            </button>
           </div>
         </div>
       </main>
